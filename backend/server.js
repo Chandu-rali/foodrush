@@ -50,6 +50,7 @@ const foods = [
     {
         id: 1,
         name: "Margherita Pizza",
+        restaurant: "Pizza Corner",
         category: "Pizza",
         price: 249,
         rating: 4.7,
@@ -58,6 +59,7 @@ const foods = [
     {
         id: 2,
         name: "Chicken Burger",
+        restaurant: "Burger House",
         category: "Burger",
         price: 199,
         rating: 4.6,
@@ -66,14 +68,16 @@ const foods = [
     {
         id: 3,
         name: "Chicken Biryani",
+        restaurant: "Biryani House",
         category: "Biryani",
         price: 299,
         rating: 4.8,
-        image: "https://images.unsplash.com/photo-1563379091339-03246963d96c?w=800"
+        image: "https://images.unsplash.com/photo-1567188040759-fb8a883dc6d8?w=800"
     },
     {
         id: 4,
         name: "Chicken Noodles",
+        restaurant: "Wok & Noodles",
         category: "Chinese",
         price: 229,
         rating: 4.5,
@@ -82,6 +86,7 @@ const foods = [
     {
         id: 5,
         name: "Paneer Pizza",
+        restaurant: "Pizza Corner",
         category: "Pizza",
         price: 279,
         rating: 4.6,
@@ -90,6 +95,7 @@ const foods = [
     {
         id: 6,
         name: "Classic Cheeseburger",
+        restaurant: "Burger House",
         category: "Burger",
         price: 219,
         rating: 4.7,
@@ -98,6 +104,7 @@ const foods = [
     {
         id: 7,
         name: "Mutton Biryani",
+        restaurant: "Biryani House",
         category: "Biryani",
         price: 349,
         rating: 4.9,
@@ -106,6 +113,7 @@ const foods = [
     {
         id: 8,
         name: "Chocolate Cake",
+        restaurant: "Sweet Treats",
         category: "Dessert",
         price: 179,
         rating: 4.5,
@@ -344,26 +352,42 @@ app.post("/api/orders", authenticateToken, async (req, res) => {
         const {
             items,
             total_amount,
-            delivery_address
+            delivery_address,
+            payment_method = "COD"
         } = req.body;
 
-        if (!items || !total_amount || !delivery_address) {
+        if (
+            !Array.isArray(items) ||
+            items.length === 0 ||
+            !Number.isFinite(Number(total_amount)) ||
+            Number(total_amount) <= 0 ||
+            typeof delivery_address !== "string" ||
+            !delivery_address.trim()
+        ) {
             return res.status(400).json({
                 success: false,
-                message: "Items, total amount and delivery address are required"
+                message: "Valid items, total amount and delivery address are required"
+            });
+        }
+
+        if (!["COD", "UPI"].includes(payment_method)) {
+            return res.status(400).json({
+                success: false,
+                message: "Payment method must be COD or UPI"
             });
         }
 
         const result = await pool.query(
             `INSERT INTO orders
-            (user_id, items, total_amount, delivery_address)
-            VALUES ($1, $2, $3, $4)
+            (user_id, items, total_amount, delivery_address, payment_method)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING *`,
             [
                 req.user.id,
                 JSON.stringify(items),
-                total_amount,
-                delivery_address
+                Number(total_amount),
+                delivery_address.trim(),
+                payment_method
             ]
         );
 
@@ -412,6 +436,205 @@ app.get("/api/orders", authenticateToken, async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Failed to fetch orders"
+        });
+    }
+});
+
+
+// =========================
+// MY PROFILE
+// =========================
+
+app.get("/api/profile", authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT id, name, email, phone, address, role, created_at
+             FROM users WHERE id = $1`,
+            [req.user.id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        res.json({ success: true, profile: result.rows[0] });
+    } catch (error) {
+        console.error("Get profile error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch profile"
+        });
+    }
+});
+
+app.put("/api/profile", authenticateToken, async (req, res) => {
+    try {
+        const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+        const phone = typeof req.body.phone === "string" ? req.body.phone.trim() : "";
+        const address = typeof req.body.address === "string" ? req.body.address.trim() : "";
+
+        if (!name || name.length > 150) {
+            return res.status(400).json({
+                success: false,
+                message: "Name is required and must be at most 150 characters"
+            });
+        }
+
+        if (phone.length > 30 || address.length > 2000) {
+            return res.status(400).json({
+                success: false,
+                message: "Phone or address is too long"
+            });
+        }
+
+        const result = await pool.query(
+            `UPDATE users
+             SET name = $1, phone = $2, address = $3
+             WHERE id = $4
+             RETURNING id, name, email, phone, address, role, created_at`,
+            [name, phone || null, address || null, req.user.id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        res.json({
+            success: true,
+            message: "Profile updated successfully",
+            profile: result.rows[0]
+        });
+    } catch (error) {
+        console.error("Update profile error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to update profile"
+        });
+    }
+});
+
+// =========================
+// GET ONE OF MY ORDERS
+// =========================
+
+app.get("/api/orders/:id", authenticateToken, async (req, res) => {
+    try {
+        const orderId = Number(req.params.id);
+
+        if (!Number.isInteger(orderId) || orderId < 1) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid order ID"
+            });
+        }
+
+        const result = await pool.query(
+            `SELECT o.*, r.rating, r.review,
+                    r.created_at AS review_created_at
+             FROM orders o
+             LEFT JOIN order_reviews r
+               ON r.order_id = o.id AND r.user_id = o.user_id
+             WHERE o.id = $1 AND o.user_id = $2`,
+            [orderId, req.user.id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Order not found"
+            });
+        }
+
+        res.json({ success: true, order: result.rows[0] });
+    } catch (error) {
+        console.error("Get order detail error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch order details"
+        });
+    }
+});
+
+// =========================
+// RATE OR REVIEW MY ORDER
+// =========================
+
+app.post("/api/orders/:id/review", authenticateToken, async (req, res) => {
+    try {
+        const orderId = Number(req.params.id);
+        const rating = Number(req.body.rating);
+        const review = typeof req.body.review === "string"
+            ? req.body.review.trim()
+            : "";
+
+        if (!Number.isInteger(orderId) || orderId < 1) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid order ID"
+            });
+        }
+
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+            return res.status(400).json({
+                success: false,
+                message: "Rating must be between 1 and 5 stars"
+            });
+        }
+
+        if (review.length > 2000) {
+            return res.status(400).json({
+                success: false,
+                message: "Review must be 2000 characters or fewer"
+            });
+        }
+
+        const ownedOrder = await pool.query(
+            "SELECT id FROM orders WHERE id = $1 AND user_id = $2",
+            [orderId, req.user.id]
+        );
+
+        if (ownedOrder.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Order not found"
+            });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO order_reviews (order_id, user_id, rating, review)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (order_id) DO UPDATE
+             SET rating = EXCLUDED.rating,
+                 review = EXCLUDED.review,
+                 created_at = CURRENT_TIMESTAMP
+             WHERE order_reviews.user_id = EXCLUDED.user_id
+             RETURNING id, order_id, user_id, rating, review, created_at`,
+            [orderId, req.user.id, rating, review || null]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(409).json({
+                success: false,
+                message: "This order already has a review from another user"
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Review saved successfully",
+            review: result.rows[0]
+        });
+    } catch (error) {
+        console.error("Save review error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to save review"
         });
     }
 });

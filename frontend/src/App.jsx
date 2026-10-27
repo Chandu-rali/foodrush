@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import "./App.css";
 
-const API_URL = "http://15.207.88.255:5000";
+const API_URL = "";
 
 const categories = [
   { name: "All", emoji: "🍽️" },
@@ -33,6 +33,7 @@ function App() {
   const [cartOpen, setCartOpen] = useState(false);
 
   const [address, setAddress] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("COD");
   const [placingOrder, setPlacingOrder] = useState(false);
 
   const [message, setMessage] = useState("");
@@ -208,10 +209,14 @@ function App() {
   const cartTotal = useMemo(() => {
     return cart.reduce(
       (total, item) =>
-        total + item.price * item.quantity,
+        total + Number(item.price) * Number(item.quantity),
       0
     );
   }, [cart]);
+
+  const deliveryFee = 40;
+  const taxAmount = Math.round(cartTotal * 0.05);
+  const grandTotal = cartTotal + deliveryFee + taxAmount;
 
   const filteredFoods = foods.filter((food) => {
     const matchesCategory =
@@ -244,8 +249,9 @@ function App() {
         `${API_URL}/api/orders`,
         {
           items: cart,
-          total_amount: cartTotal,
-          delivery_address: address
+          total_amount: grandTotal,
+          delivery_address: address.trim(),
+          payment_method: paymentMethod
         },
         {
           headers: {
@@ -257,6 +263,7 @@ function App() {
       if (response.data.success) {
         setCart([]);
         setAddress("");
+        setPaymentMethod("COD");
         setCartOpen(false);
 
         setMessage(
@@ -628,6 +635,9 @@ function App() {
                 </div>
 
                 <div className="food-info">
+                  <span className="food-restaurant">
+                    {food.restaurant || "FoodRush Kitchen"}
+                  </span>
 
                   <span className="food-category">
                     {food.category}
@@ -821,6 +831,40 @@ function App() {
                     }
                   />
 
+                  <div className="payment-method">
+                    <h3>Payment Method</h3>
+
+                    <label>
+                      <input
+                        type="radio"
+                        name="paymentMethod"
+                        value="COD"
+                        checked={paymentMethod === "COD"}
+                        onChange={() => setPaymentMethod("COD")}
+                      />
+                      <span>Cash on Delivery (COD)</span>
+                    </label>
+
+                    <label>
+                      <input
+                        type="radio"
+                        name="paymentMethod"
+                        value="UPI"
+                        checked={paymentMethod === "UPI"}
+                        onChange={() => setPaymentMethod("UPI")}
+                      />
+                      <span>UPI</span>
+                    </label>
+
+                    {paymentMethod === "UPI" && (
+                      <p className="payment-note">
+                        UPI is selected. Online payment collection is not
+                        enabled yet; this order will record UPI as the
+                        selected payment method.
+                      </p>
+                    )}
+                  </div>
+
                   <div className="bill">
 
                     <div>
@@ -839,7 +883,7 @@ function App() {
                       </span>
 
                       <span>
-                        ₹40
+                        ₹{deliveryFee}
                       </span>
                     </div>
 
@@ -849,7 +893,7 @@ function App() {
                       </span>
 
                       <span>
-                        ₹{Math.round(cartTotal * 0.05)}
+                        ₹{taxAmount}
                       </span>
                     </div>
 
@@ -863,11 +907,7 @@ function App() {
 
                       <strong>
                         ₹
-                        {cartTotal +
-                          40 +
-                          Math.round(
-                            cartTotal * 0.05
-                          )}
+                        {grandTotal}
                       </strong>
 
                     </div>
